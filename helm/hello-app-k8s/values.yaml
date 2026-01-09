@@ -1,0 +1,6 @@
+# Default/base values
+replicaCount: 1
+image:
+  repository: ""
+  tag: ""
+  digest: ""

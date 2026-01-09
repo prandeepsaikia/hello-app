@@ -1,0 +1,25 @@
+replicaCount: 2
+namespace: "hawk"
+image:
+  repository: psaikia/hello-app
+  tag: ""
+  pullPolicy: IfNotPresent
+  digest: ""
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "200m"
+    memory: "128Mi"
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+podAnnotations: {}
+autoscaling:
+  enabled: false
+terminationGracePeriodSeconds: 10

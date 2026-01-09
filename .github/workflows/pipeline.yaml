@@ -1,0 +1,260 @@
+name: CI/CD — Secure GitOps Pipeline
+
+on:
+  push:
+    branches: [ staging, main ]
+  pull_request:
+    branches: [ staging ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ vars.DOCKERHUB_USERNAME }}/hello-app
+
+
+jobs:
+
+  build:
+    name: 🏗️ CI — Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/ci-base
+      - run: ./gradlew build -x test --parallel --build-cache
+
+  test:
+    name: 🧪 CI — Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/ci-base
+      - run: ./gradlew test
+      - uses: mikepenz/action-junit-report@v5
+        if: always()
+        with:
+          report_paths: '**/build/test-results/test/TEST-*.xml'
+
+  static-analysis:
+    if: github.ref == 'refs/heads/staging' &&
+      !contains(github.event.head_commit.message, 'Merge') &&
+      !contains(github.event.head_commit.message, 'Resolve conflicts')
+    name: 🔍 CI — Static Analysis (Checkstyle & SpotBugs)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/ci-base
+
+      - name: Run Checkstyle
+        run: ./gradlew checkstyleMain checkstyleTest
+
+      - name: Run SpotBugs
+        run: ./gradlew spotbugsMain
+
+  security-scanning-codeql:
+    if: github.ref == 'refs/heads/staging' &&
+      !contains(github.event.head_commit.message, 'Merge') &&
+      !contains(github.event.head_commit.message, 'Resolve conflicts')
+    name: 🔐 CI — CodeQL
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: java
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+
+
+
+  build-scan-sign-image:
+    if: github.ref == 'refs/heads/staging' &&
+      !contains(github.event.head_commit.message, 'Merge') &&
+      !contains(github.event.head_commit.message, 'Resolve conflicts')
+    name: 🐳 CD — Build, Scan, Sign, Push
+    needs: [test, static-analysis, security-scanning-codeql]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      security-events: write
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+      image_tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=short,priority=200
+            type=raw,value=staging,enable=true,priority=100
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Local Image for Scan
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: true
+          format: sarif
+          output: trivy.sarif
+        env:
+          TRIVY_SCANNERS: vuln
+
+      - uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy.sarif') != ''
+        with:
+          sarif_file: trivy.sarif
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          sbom: true
+          provenance: true
+
+      - uses: sigstore/cosign-installer@v4.0.0
+        with:
+          cosign-release: v3.0.3
+      - run: cosign sign --yes "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+
+  helm-validate-staging:
+    if: github.ref == 'refs/heads/staging' &&
+      !contains(github.event.head_commit.message, 'Merge') &&
+      !contains(github.event.head_commit.message, 'Resolve conflicts')
+    name: ☸️ Validate Manifests & Update Staging
+    needs: build-scan-sign-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4.3.1
+        with:
+          version: v4.0.4
+
+      # 1. Check Staging
+      - name: Lint and Template Staging
+        run: |
+          helm lint helm/hello-app-k8s -f helm/hello-app-k8s/values.yaml -f helm/hello-app-k8s/values-staging.yaml
+          helm template staging-test helm/hello-app-k8s -f helm/hello-app-k8s/values.yaml -f helm/hello-app-k8s/values-staging.yaml >> rendered-manifest.yaml
+
+      # 2. Check Production
+      - name: Lint and Template Production
+        run: |
+          echo "---" >> rendered-manifest.yaml
+          helm lint helm/hello-app-k8s -f helm/hello-app-k8s/values.yaml -f helm/hello-app-k8s/values-prod.yaml
+          helm template prod-test helm/hello-app-k8s -f helm/hello-app-k8s/values.yaml -f helm/hello-app-k8s/values-prod.yaml >> rendered-manifest.yaml
+
+      # 3. Security scan both rendered manifests
+      - uses: instrumenta/conftest-action@v0.4.0
+        with:
+          files: rendered-manifest.yaml
+          policy: 'helm/policy'
+          namespace: 'hawk'
+
+      - name: Update Helm values
+        env:
+          TAG: ${{ needs.build-scan-sign-image.outputs.image_tag }}
+          DIGEST: ${{ needs.build-scan-sign-image.outputs.image_digest }}
+        run: |
+          yq -i '.image.tag = strenv(TAG)' helm/hello-app-k8s/values-staging.yaml
+          yq -i '.image.digest = strenv(DIGEST)' helm/hello-app-k8s/values-staging.yaml
+      - uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "chore(deploy): release ${{ needs.build.outputs.image_tag }}"
+          branch: staging
+          file_pattern: helm/hello-app-k8s/values-staging.yaml
+
+  promote:
+    if: github.ref == 'refs/heads/staging'
+    name: 🔀 Create Promotion PR
+    needs: helm-validate-staging
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create Promotion Branch and PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/promote.sh
+
+  retag-latest:
+    if: github.ref == 'refs/heads/main'
+    name: 🔖 Retag latest on main branch
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read digest from values-prod.yaml
+        id: get_digest
+        run: |
+          # Read from the production file, as this is the 'main' branch context
+          DIGEST=$(yq '.image.digest' helm/hello-app-k8s/values-prod.yaml)
+          echo "DIGEST=$DIGEST" >> $GITHUB_ENV
+          
+          if [ -z "$DIGEST" ] || [ "$DIGEST" == "null" ]; then
+            echo "Error: Digest not found in values-prod.yaml"
+            exit 1
+          fi
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Retag digest as latest
+        run: |
+          # This creates a new 'latest' tag pointing to the specific digest verified in prod
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ env.DIGEST }}
