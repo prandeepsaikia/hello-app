@@ -148,11 +148,11 @@ jobs:
           load: true
           push: false
           tags: |
-            ${{ steps.meta.outputs.images }}:scan
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:scan
 
       - uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: "${{ steps.meta.outputs.images }}:scan"
+          image-ref: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:scan"
           severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: true
