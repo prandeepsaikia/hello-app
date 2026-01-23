@@ -130,6 +130,7 @@ jobs:
           context: .
           load: true
           push: false
+          tags: ${{ steps.meta.outputs.tags }}
 
       - uses: aquasecurity/trivy-action@0.33.1
         with:
