@@ -129,17 +129,6 @@ jobs:
           name: app-jar
           path: build/libs
 
-      - name: Path Verification
-        run: |
-          echo "Current Directory: $(pwd)"
-          echo "Checking build/libs content:"
-          ls -la build/libs
-          echo "Finding JAR absolute path:"
-          find $(pwd) -name "hello-app.jar"    
-
-      - name: List files for debugging
-        run: ls -R build/libs
-
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -191,7 +180,7 @@ jobs:
         with:
           file: ci.Dockerfile
           context: .
-          no-cache: true
+         # no-cache: true
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}

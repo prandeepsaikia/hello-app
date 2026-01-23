@@ -7,7 +7,7 @@ public class HelloApp {
     public void startHelloLoop() {
         try {
             while (!Thread.interrupted()) {
-                println("Hello World !!!");
+                println("Hello World % %");
                 Thread.sleep(2000);
             }
         } catch (InterruptedException _) {
