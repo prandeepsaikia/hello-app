@@ -26,7 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/ci-base
-      - run: ./gradlew build -x test --parallel --build-cache
+      - name: Build JAR
+        run: ./gradlew clean build -x test --parallel --build-cache
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: build/libs/*.jar
 
   test:
     name: 🧪 CI — Test
@@ -91,6 +98,7 @@ jobs:
     if: github.ref == 'refs/heads/staging' &&
       !contains(github.event.head_commit.message, 'Merge') &&
       !contains(github.event.head_commit.message, 'Resolve conflicts')
+
     name: 🐳 CD — Build, Scan, Sign, Push
     needs: [ test, static-analysis, security-scanning-codeql ]
     runs-on: ubuntu-latest
@@ -105,6 +113,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Download JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: build/libs
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -123,18 +138,21 @@ jobs:
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - uses: docker/setup-buildx-action@v3
       - name: Build Local Image for Scan
         uses: docker/build-push-action@v6
         with:
+          file: Dockerfile.ci
           context: .
           load: true
           push: false
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ${{ steps.meta.outputs.images }}:scan
 
       - uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+          image-ref: "${{ steps.meta.outputs.images }}:scan"
           severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: true
@@ -151,6 +169,7 @@ jobs:
       - uses: docker/build-push-action@v6
         id: build
         with:
+          file: Dockerfile.ci
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
