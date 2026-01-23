@@ -43,8 +43,13 @@ jobs:
       checks: write
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v3
+
       - uses: ./.github/actions/ci-base
       - run: ./gradlew test
+
       - uses: mikepenz/action-junit-report@v5
         if: always()
         with:
@@ -59,6 +64,10 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v3
+
       - uses: ./.github/actions/ci-base
 
       - name: Run Checkstyle
@@ -100,7 +109,7 @@ jobs:
       !contains(github.event.head_commit.message, 'Resolve conflicts')
 
     name: 🐳 CD — Build, Scan, Sign, Push
-    needs: [ test, static-analysis, security-scanning-codeql ]
+    needs: [ build, test, static-analysis, security-scanning-codeql ]
     runs-on: ubuntu-latest
     permissions:
       contents: read
