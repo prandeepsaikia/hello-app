@@ -1,6 +1,11 @@
 .gradle
-build
-!build/libs/*.jar
 out
 .git
 Dockerfile
+
+# Ignore everything in build
+build/**
+
+# Re-allow jar directory
+!build/libs/
+!build/libs/*.jar
