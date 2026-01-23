@@ -30,7 +30,7 @@ jobs:
         run: ./gradlew clean build -x test --parallel --build-cache
 
       - name: Upload JAR
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: app-jar
           path: build/libs/*.jar
@@ -115,10 +115,13 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download JAR
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: app-jar
           path: build/libs
+
+      - name: List files for debugging
+        run: ls -R build/libs
 
       - name: Docker meta
         id: meta
@@ -175,6 +178,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           sbom: true
           provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - uses: sigstore/cosign-installer@v4.0.0
         with:
