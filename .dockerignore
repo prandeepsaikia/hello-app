@@ -1,6 +1,15 @@
 .gradle
-build
-!build/libs/*.jar
 out
 .git
 Dockerfile
+
+# 1. Ignore everything inside build, but NOT the build folder itself
+build/*
+
+# 2. Allow the libs directory
+!build/libs/
+
+# 3. (Optional) Ignore everything in libs except the jar
+# This keeps the context small if there are other files in libs
+build/libs/*
+!build/libs/*.jar

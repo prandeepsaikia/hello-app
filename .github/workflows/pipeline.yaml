@@ -26,7 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/ci-base
-      - run: ./gradlew build -x test --parallel --build-cache
+      - name: Build JAR
+        run: ./gradlew clean build -x test --parallel --build-cache
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v6
+        with:
+          name: app-jar
+          path: build/libs/*.jar
 
   test:
     name: 🧪 CI — Test
@@ -36,8 +43,13 @@ jobs:
       checks: write
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v3
+
       - uses: ./.github/actions/ci-base
       - run: ./gradlew test
+
       - uses: mikepenz/action-junit-report@v5
         if: always()
         with:
@@ -52,6 +64,10 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v3
+
       - uses: ./.github/actions/ci-base
 
       - name: Run Checkstyle
@@ -91,8 +107,9 @@ jobs:
     if: github.ref == 'refs/heads/staging' &&
       !contains(github.event.head_commit.message, 'Merge') &&
       !contains(github.event.head_commit.message, 'Resolve conflicts')
+
     name: 🐳 CD — Build, Scan, Sign, Push
-    needs: [ test, static-analysis, security-scanning-codeql ]
+    needs: [ build, test, static-analysis, security-scanning-codeql ]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -105,6 +122,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Download JAR
+        uses: actions/download-artifact@v7
+        with:
+          name: app-jar
+          path: build/libs
+
+      - name: Path Verification
+        run: |
+          echo "Current Directory: $(pwd)"
+          echo "Checking build/libs content:"
+          ls -la build/libs
+          echo "Finding JAR absolute path:"
+          find $(pwd) -name "hello-app.jar"    
+
+      - name: List files for debugging
+        run: ls -R build/libs
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -123,18 +158,21 @@ jobs:
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - uses: docker/setup-buildx-action@v3
       - name: Build Local Image for Scan
         uses: docker/build-push-action@v6
         with:
+          file: ci.Dockerfile
           context: .
           load: true
           push: false
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:scan
 
       - uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+          image-ref: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:scan"
           severity: CRITICAL,HIGH
           exit-code: 1
           ignore-unfixed: true
@@ -151,11 +189,16 @@ jobs:
       - uses: docker/build-push-action@v6
         id: build
         with:
+          file: ci.Dockerfile
+          context: .
+          no-cache: true
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           sbom: true
           provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - uses: sigstore/cosign-installer@v4.0.0
         with:
