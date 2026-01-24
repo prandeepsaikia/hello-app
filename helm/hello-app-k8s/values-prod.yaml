@@ -3,6 +3,9 @@ namespace: "hawk"
 image:
   repository: psaikia/hello-app
   tag: ""
+  previous:
+    tag: ""
+    digest: ""
   pullPolicy: IfNotPresent
   digest: ""
 resources:

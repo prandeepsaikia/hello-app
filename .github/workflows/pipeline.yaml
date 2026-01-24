@@ -240,7 +240,7 @@ jobs:
           yq -i '.image.digest = strenv(DIGEST)' helm/hello-app-k8s/values-staging.yaml
       - uses: stefanzweifel/git-auto-commit-action@v7
         with:
-          commit_message: "chore(deploy): release ${{ needs.build.outputs.image_tag }}"
+          commit_message: "chore(deploy): release ${{ needs.build-scan-sign-image.outputs.image_tag }}"
           branch: staging
           file_pattern: helm/hello-app-k8s/values-staging.yaml
 
