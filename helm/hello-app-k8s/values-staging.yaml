@@ -2,9 +2,9 @@ replicaCount: 1
 namespace: "hawk"
 image:
   repository: psaikia/hello-app
-  tag: "sha-bd3a165"
+  tag: "sha-f610781"
   pullPolicy: IfNotPresent
-  digest: "sha256:f10ee4ca0eb88545b5f566132d746fa7430cd74d9f23228bd54fcaeb7beb872b"
+  digest: "sha256:d8800e3f9717ff912e1a519d4885296d1dbd9d811af48bf3e944fb6cabeeb421"
 resources:
   requests:
     cpu: "50m"
